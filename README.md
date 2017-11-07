@@ -1,2 +1,2 @@
 # event
-Tiny event-loop library for event-driven applications
+Tiny epoll-based event loop library for event-driven Linux applications
