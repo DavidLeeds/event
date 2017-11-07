@@ -108,7 +108,7 @@ static void event_dispatch_handler(struct event_io *io, uint32_t event_mask,
 
 /*
  * Register the event state to receive dispatched callbacks.
- * Return 0 on success, or -errno on failure.
+ * Returns 0 on success, or -errno on failure.
  */
 static int event_register_dispatch_handler(struct event_context *ctx)
 {
@@ -257,7 +257,7 @@ static int event_poll(struct event_context *ctx)
 
 /*
  * Initialize an event context.
- * Return 0 on success, or -errno on failure.
+ * Returns 0 on success, or -errno on failure.
  */
 int event_init(struct event_context *ctx)
 {
@@ -342,7 +342,7 @@ int event_run(struct event_context *ctx)
 
 /*
  * Thread and signal-safe mechanism to signal event_run() to return.
- * Return 0 on success, or -errno on failure.
+ * Returns 0 on success, or -errno on failure.
  */
 int event_stop(const struct event_context *ctx)
 {
@@ -351,7 +351,7 @@ int event_stop(const struct event_context *ctx)
 
 /*
  * Thread and signal-safe mechanism to invoke a function on the event thread,
- * Return 0 on success, or -errno on failure.
+ * Returns 0 on success, or -errno on failure.
  */
 int event_dispatch(const struct event_context *ctx,
         void (*handler)(void *), void *arg)
@@ -397,7 +397,7 @@ void event_io_init(struct event_context *ctx, struct event_io *io,
  * Register to get event callbacks for an I/O file descriptor.  This may be
  * called with an already-registered file descriptor to modify the events to
  * listen for.
- * Return 0 on success, or -errno on failure.
+ * Returns 0 on success, or -errno on failure.
  */
 int event_io_register(struct event_io *io, int fd, uint32_t event_mask)
 {
@@ -431,7 +431,7 @@ int event_io_register(struct event_io *io, int fd, uint32_t event_mask)
 
 /*
  * Unregister an I/O event listener.
- * Return 0 on success, or -errno on failure.
+ * Returns 0 on success, or -errno on failure.
  */
 int event_io_unregister(struct event_io *io)
 {
