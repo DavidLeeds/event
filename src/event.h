@@ -43,8 +43,7 @@ struct event_io {
 };
 
 /*
- * Structure for individual timer state.  Pending timers are inserted in to
- * a timer_context linked list in chronological order.
+ * State for a timer.
  */
 struct event_timer {
     struct event_context *ctx;
@@ -55,6 +54,10 @@ struct event_timer {
     LIST_ENTRY(event_timer) entry;
 };
 
+/*
+ * State for an event context that manages all registered events for a given
+ * event thread.
+ */
 struct event_context {
     pthread_t thread;
     int epoll_fd;
