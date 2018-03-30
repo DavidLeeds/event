@@ -12,11 +12,11 @@
 #include <sys/socket.h>
 #include <errno.h>
 
-#include <event.h>
+#include "event.h"
 
 #ifndef EVENT_NOASSERT
 #include <assert.h>
-#define EVENT_ASSERT(expr)	assert(expr)
+#define EVENT_ASSERT(expr)              assert(expr)
 #else
 #define EVENT_ASSERT(expr)
 #endif
@@ -30,7 +30,7 @@
 #endif
 
 /*
- * Maximum number of events to process at at time with event_poll().  Remaining
+ * Maximum number of events to process at a time with event_poll().  Remaining
  * events will be processed by a subsequent call.
  */
 #define EVENT_MAXEVENTS                 32
@@ -540,14 +540,12 @@ int64_t event_timer_delay_ms(const struct event_timer* t)
 
     EVENT_ASSERT(t != NULL);
 
-    if (!t->time_ms)
-    {
+    if (!t->time_ms) {
         /* Timer not set */
         return -1;
     }
     cur_time_ms = event_monotonic_ms();
-    if (cur_time_ms >= t->time_ms)
-    {
+    if (cur_time_ms >= t->time_ms) {
         /* Trigger time is now */
         return 0;
     }
