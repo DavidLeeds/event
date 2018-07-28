@@ -13,6 +13,8 @@
 #include <sys/queue.h>
 #include <pthread.h>
 
+struct epoll_event;
+
 /*
  * Define EVENT_NOASSERT to compile out all assertions used internally.
  */
@@ -59,6 +61,8 @@ struct event_timer {
 struct event_context {
     pthread_t thread;
     int epoll_fd;
+    struct epoll_event *epoll_pending;
+    size_t epoll_pending_len;
     LIST_HEAD(, event_io) io_list;
     int dispatch_fd;
     struct event_io dispatch_listener;

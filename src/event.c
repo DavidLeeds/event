@@ -17,7 +17,7 @@
 
 #ifndef EVENT_NOASSERT
 #include <assert.h>
-#define EVENT_ASSERT(expr)              assert(expr)
+#define EVENT_ASSERT(expr)	assert(expr)
 #else
 #define EVENT_ASSERT(expr)
 #endif
@@ -239,13 +239,21 @@ static int event_poll(struct event_context *ctx)
         /* One or more events to process */
         for (e = epoll_buf; e < &epoll_buf[r]; ++e) {
             io = e->data.ptr;
+            if (!io) {
+                /* Skip invalidated pending event */
+                continue;
+            }
             event_mask = event_mask_from_epoll_events(e->events);
             if (!event_mask) {
                 /* Received event we don't care about */
                 continue;
             }
+            ctx->epoll_pending = e + 1;
+            ctx->epoll_pending_len = &epoll_buf[r] - e - 1;
             io->handler(io, event_mask, io->handler_arg);
         }
+        ctx->epoll_pending = NULL;
+        ctx->epoll_pending_len = 0;
         return 0;
     }
     if (r < 0 && errno != EINTR) {
@@ -268,11 +276,19 @@ int event_init(struct event_context *ctx)
     ctx->thread = pthread_self();
 
     /* Initialize I/O listener */
-    /* XXX using older epoll_create() to support legacy toolchains */
+#ifdef EPOLL_CLOEXEC
+    ctx->epoll_fd = epoll_create1(EPOLL_CLOEXEC);
+#else
     ctx->epoll_fd = epoll_create(1);
+    if (ctx->epoll_fd >= 0) {
+        fcntl(ctx->epoll_fd, F_SETFD, FD_CLOEXEC);
+    }
+#endif
     if (ctx->epoll_fd < 0) {
         return -errno;
     }
+    ctx->epoll_pending = NULL;
+    ctx->epoll_pending_len = 0;
     LIST_INIT(&ctx->io_list);
 
     /* Initialize timer */
@@ -436,6 +452,7 @@ int event_io_register(struct event_io *io, int fd, uint32_t event_mask)
  */
 int event_io_unregister(struct event_io *io)
 {
+    struct epoll_event *e;
     int r = 0;
 
     EVENT_ASSERT(io != NULL);
@@ -450,6 +467,19 @@ int event_io_unregister(struct event_io *io)
      */
     if (epoll_ctl(io->ctx->epoll_fd, EPOLL_CTL_DEL, io->fd, (void *)1) < 0) {
         r = -errno;
+    }
+    if (io->ctx->epoll_pending) {
+        /*
+         * This handles the case where an I/O listener is unregistered by an
+         * event callback invoked by event_poll().  In this case, we need to
+         * invalidate any pending events that reference this I/O listener.
+         */
+        for (e = io->ctx->epoll_pending;
+                e < &io->ctx->epoll_pending[io->ctx->epoll_pending_len]; ++e) {
+            if (e->data.ptr == io) {
+                e->data.ptr = NULL;
+            }
+        }
     }
     io->fd = -1;
     return r;
