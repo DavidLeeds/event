@@ -10,6 +10,7 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/epoll.h>
 #include <errno.h>
 
 #include "event.h"
@@ -401,9 +402,13 @@ void event_io_init(struct event_context *ctx, struct event_io *io,
  */
 int event_io_register(struct event_io *io, int fd, uint32_t event_mask)
 {
+    struct epoll_event event = {
+        .events = event_mask_to_epoll_events(event_mask),
+        .data.ptr = io
+    };
+
     EVENT_ASSERT(io != NULL);
     EVENT_ASSERT(io->ctx != NULL);
-    EVENT_ASSERT(event_mask != 0);
 
     if (io->fd != -1) {
         if (io->fd != fd) {
@@ -411,17 +416,13 @@ int event_io_register(struct event_io *io, int fd, uint32_t event_mask)
             return -EEXIST;
         }
         /* Modify an existing listener's events */
-        io->epoll.events = event_mask_to_epoll_events(event_mask);
-        if (epoll_ctl(io->ctx->epoll_fd, EPOLL_CTL_MOD, io->fd,
-                &io->epoll) < 0) {
+        if (epoll_ctl(io->ctx->epoll_fd, EPOLL_CTL_MOD, io->fd, &event) < 0) {
             return -errno;
         }
         return 0;
     }
     /* Add a new listener */
-    io->epoll.events = event_mask_to_epoll_events(event_mask);
-    io->epoll.data.ptr = io;
-    if (epoll_ctl(io->ctx->epoll_fd, EPOLL_CTL_ADD, fd, &io->epoll) < 0) {
+    if (epoll_ctl(io->ctx->epoll_fd, EPOLL_CTL_ADD, fd, &event) < 0) {
         return -errno;
     }
     io->fd = fd;
@@ -435,7 +436,7 @@ int event_io_register(struct event_io *io, int fd, uint32_t event_mask)
  */
 int event_io_unregister(struct event_io *io)
 {
-    int r;
+    int r = 0;
 
     EVENT_ASSERT(io != NULL);
 
@@ -443,7 +444,11 @@ int event_io_unregister(struct event_io *io)
         return 0;
     }
     LIST_REMOVE(io, entry);
-    if (epoll_ctl(io->ctx->epoll_fd, EPOLL_CTL_DEL, io->fd, &io->epoll) < 0) {
+    /*
+     * Note: event arg is ignored for EPOLL_CTL_DEL, but Linux kernel < 2.6.9
+     * required a non-NULL argument.  Passing in 1 for portability.
+     */
+    if (epoll_ctl(io->ctx->epoll_fd, EPOLL_CTL_DEL, io->fd, (void *)1) < 0) {
         r = -errno;
     }
     io->fd = -1;

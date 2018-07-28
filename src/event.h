@@ -10,7 +10,6 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <sys/epoll.h>
 #include <sys/queue.h>
 #include <pthread.h>
 
@@ -35,7 +34,6 @@ struct event_context;
  */
 struct event_io {
     struct event_context *ctx;
-    struct epoll_event epoll;
     int fd;
     void (*handler)(struct event_io *, uint32_t, void *);
     void *handler_arg;
