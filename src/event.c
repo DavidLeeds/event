@@ -52,13 +52,13 @@ static uint32_t event_mask_to_epoll_events(uint32_t events)
 {
     uint32_t mask = 0;
 
-    if (events & EVENT_READ) {
+    if (events & EVENT_IO_READ) {
         mask |= EVENT_EPOLL_READ;
     }
-    if (events & EVENT_WRITE) {
+    if (events & EVENT_IO_WRITE) {
         mask |= EVENT_EPOLL_WRITE;
     }
-    if (events & EVENT_HANGUP) {
+    if (events & EVENT_IO_HANGUP) {
         mask |= EVENT_EPOLL_HANGUP;
     }
     return mask;
@@ -72,13 +72,13 @@ static uint32_t event_mask_from_epoll_events(uint32_t events)
     uint32_t mask = 0;
 
     if (events & EVENT_EPOLL_READ) {
-        mask |= EVENT_READ;
+        mask |= EVENT_IO_READ;
     }
     if (events & EVENT_EPOLL_WRITE) {
-        mask |= EVENT_WRITE;
+        mask |= EVENT_IO_WRITE;
     }
     if (events & EVENT_EPOLL_HANGUP) {
-        mask |= EVENT_HANGUP;
+        mask |= EVENT_IO_HANGUP;
     }
     return mask;
 }
@@ -123,7 +123,7 @@ static int event_register_dispatch_handler(struct event_context *ctx)
     /* Set the receiving file descriptor to non-blocking mode */
     fcntl(fds[1], F_SETFL, fcntl(fds[1], F_GETFL, 0) | O_NONBLOCK);
     /* Listen for dispatch messages */
-    r = event_io_register(&ctx->dispatch_listener, fds[1], EVENT_READ);
+    r = event_io_register(&ctx->dispatch_listener, fds[1], EVENT_IO_READ);
     if (r < 0) {
         close(fds[0]);
         close(fds[1]);

@@ -22,9 +22,9 @@
  * One-hot encoded I/O event types.
  */
 enum event_io_type {
-    EVENT_READ          = 0x01,
-    EVENT_WRITE         = 0x02,
-    EVENT_HANGUP        = 0x04
+    EVENT_IO_READ       = 0x01,
+    EVENT_IO_WRITE      = 0x02,
+    EVENT_IO_HANGUP     = 0x04
 };
 
 struct event_context;
@@ -136,7 +136,7 @@ struct event_io *event_io_find_by_fd(const struct event_context *ctx,
  */
 static inline bool event_io_is_read(uint32_t event_mask)
 {
-    return event_mask & EVENT_READ;
+    return event_mask & EVENT_IO_READ;
 }
 
 /*
@@ -144,7 +144,7 @@ static inline bool event_io_is_read(uint32_t event_mask)
  */
 static inline bool event_io_is_write(uint32_t event_mask)
 {
-    return event_mask & EVENT_WRITE;
+    return event_mask & EVENT_IO_WRITE;
 }
 
 /*
@@ -152,7 +152,7 @@ static inline bool event_io_is_write(uint32_t event_mask)
  */
 static inline bool event_io_is_hangup(uint32_t event_mask)
 {
-    return event_mask & EVENT_HANGUP;
+    return event_mask & EVENT_IO_HANGUP;
 }
 
 /*
