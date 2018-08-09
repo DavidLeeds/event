@@ -58,7 +58,7 @@ static uint32_t event_mask_to_epoll_events(uint32_t events)
     if (events & EVENT_IO_WRITE) {
         mask |= EVENT_EPOLL_WRITE;
     }
-    if (events & EVENT_IO_HANGUP) {
+    if (events & EVENT_IO_DISCONNECT) {
         mask |= EVENT_EPOLL_HANGUP;
     }
     return mask;
@@ -78,7 +78,7 @@ static uint32_t event_mask_from_epoll_events(uint32_t events)
         mask |= EVENT_IO_WRITE;
     }
     if (events & EVENT_EPOLL_HANGUP) {
-        mask |= EVENT_IO_HANGUP;
+        mask |= EVENT_IO_DISCONNECT;
     }
     return mask;
 }
@@ -148,6 +148,28 @@ static void event_unregister_dispatch_handler(struct event_context *ctx)
     fd = ctx->dispatch_listener.fd;
     event_io_unregister(&ctx->dispatch_listener);
     close(fd);
+}
+
+/*
+ * Applies a new event mask to an I/O listener.  This immediately clears any
+ * pending events received from epoll_wait() for this I/O listener that are no
+ * longer registered for.  This is needed to safely apply a registration change
+ * while processing pending events.
+ */
+static void event_io_set_mask(struct event_io *io, uint32_t event_mask)
+{
+    struct epoll_event *e;
+
+    io->event_mask = event_mask;
+
+    if (io->ctx->epoll_pending) {
+        for (e = io->ctx->epoll_pending;
+                e < &io->ctx->epoll_pending[io->ctx->epoll_pending_len]; ++e) {
+            if (e->data.ptr == io) {
+                e->events &= event_mask;
+            }
+        }
+    }
 }
 
 /*
@@ -239,18 +261,29 @@ static int event_poll(struct event_context *ctx)
         /* One or more events to process */
         for (e = epoll_buf; e < &epoll_buf[r]; ++e) {
             io = e->data.ptr;
-            if (!io) {
-                /* Skip invalidated pending event */
-                continue;
-            }
-            event_mask = event_mask_from_epoll_events(e->events) &
-                    io->event_mask;
+            event_mask = event_mask_from_epoll_events(e->events);
             if (!event_mask) {
-                /* Received event we don't care about */
+                /* Received an invalidated or unsupported event */
                 continue;
             }
+            /* Expose pending list for event_io_set_mask() */
             ctx->epoll_pending = e + 1;
             ctx->epoll_pending_len = &epoll_buf[r] - e - 1;
+
+            if (event_mask == EVENT_IO_DISCONNECT &&
+                    !(io->event_mask & EVENT_IO_DISCONNECT)) {
+                /*
+                 * epoll automatically registers listeners for HUP and ERR
+                 * events that indicate the I/O endpoint was closed. This
+                 * handles the case where the endpoint was closed and there are
+                 * no other pending READ/WRITE events, but a DISCONNECT
+                 * listener was not registered. To avoid receiving this event
+                 * repeatedly, clear this listener now.
+                 */
+                epoll_ctl(ctx->epoll_fd, EPOLL_CTL_DEL, io->fd, e);
+                event_io_set_mask(io, 0);
+                continue;
+            }
             io->handler(io, event_mask, io->handler_arg);
         }
         ctx->epoll_pending = NULL;
@@ -419,7 +452,7 @@ void event_io_init(struct event_context *ctx, struct event_io *io,
  */
 int event_io_register(struct event_io *io, int fd, uint32_t event_mask)
 {
-    struct epoll_event event = {
+    struct epoll_event e = {
         .events = event_mask_to_epoll_events(event_mask),
         .data.ptr = io
     };
@@ -427,30 +460,36 @@ int event_io_register(struct event_io *io, int fd, uint32_t event_mask)
     EVENT_ASSERT(io != NULL);
     EVENT_ASSERT(io->ctx != NULL);
 
-    if (io->fd != -1) {
-        /* Modifying an existing listener's events */
-        if (io->fd != fd) {
-            /* Listener is already registered to a different FD */
-            return -EEXIST;
-        }
-        if (event_mask == io->event_mask) {
-            /* No change */
-            return 0;
-        }
-        if (epoll_ctl(io->ctx->epoll_fd, EPOLL_CTL_MOD, io->fd, &event) < 0) {
-            return -errno;
-        }
-        io->event_mask = event_mask;
+    if (fd < 0) {
+        /* Invalid file descriptor */
+        return -EBADF;
+    }
+    if (io->fd != -1 && io->fd != fd) {
+        /* Listener is already registered to a different FD */
+        return -EEXIST;
+    }
+    if (event_mask == io->event_mask) {
+        /* No change */
         return 0;
     }
-
-    /* Adding a new listener */
-    if (epoll_ctl(io->ctx->epoll_fd, EPOLL_CTL_ADD, fd, &event) < 0) {
-        return -errno;
+    if (io->event_mask) {
+        /* Modify/remove an existing listener */
+        if (event_mask) {
+            if (epoll_ctl(io->ctx->epoll_fd, EPOLL_CTL_MOD, io->fd, &e) < 0) {
+                return -errno;
+            }
+        } else {
+            epoll_ctl(io->ctx->epoll_fd, EPOLL_CTL_DEL, io->fd, &e);
+        }
+    } else {
+        /* Add a new listener */
+        if (epoll_ctl(io->ctx->epoll_fd, EPOLL_CTL_ADD, fd, &e) < 0) {
+            return -errno;
+        }
+        io->fd = fd;
+        LIST_INSERT_HEAD(&io->ctx->io_list, io, entry);
     }
-    io->fd = fd;
-    io->event_mask = event_mask;
-    LIST_INSERT_HEAD(&io->ctx->io_list, io, entry);
+    event_io_set_mask(io, event_mask);
     return 0;
 }
 
@@ -460,38 +499,25 @@ int event_io_register(struct event_io *io, int fd, uint32_t event_mask)
  */
 int event_io_unregister(struct event_io *io)
 {
-    struct epoll_event *e;
-    int r = 0;
-
     EVENT_ASSERT(io != NULL);
 
     if (io->fd == -1) {
+        /* Not registered */
         return 0;
     }
     LIST_REMOVE(io, entry);
-    /*
-     * Note: event arg is ignored for EPOLL_CTL_DEL, but Linux kernel < 2.6.9
-     * required a non-NULL argument.  Passing in 1 for portability.
-     */
-    if (epoll_ctl(io->ctx->epoll_fd, EPOLL_CTL_DEL, io->fd, (void *)1) < 0) {
-        r = -errno;
-    }
-    if (io->ctx->epoll_pending) {
+
+    if (io->event_mask) {
         /*
-         * This handles the case where an I/O listener is unregistered by an
-         * event callback invoked by event_poll().  In this case, we need to
-         * invalidate any pending events that reference this I/O listener.
+         * Note: event arg is ignored for EPOLL_CTL_DEL, but Linux
+         * kernel < 2.6.9 required a non-NULL argument.  Passing in 1 for
+         * portability.
          */
-        for (e = io->ctx->epoll_pending;
-                e < &io->ctx->epoll_pending[io->ctx->epoll_pending_len]; ++e) {
-            if (e->data.ptr == io) {
-                e->data.ptr = NULL;
-            }
-        }
+        epoll_ctl(io->ctx->epoll_fd, EPOLL_CTL_DEL, io->fd, (void *)1);
+        event_io_set_mask(io, 0);
     }
     io->fd = -1;
-    io->event_mask = 0;
-    return r;
+    return 0;
 }
 
 /*
