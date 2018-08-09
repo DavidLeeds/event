@@ -243,7 +243,8 @@ static int event_poll(struct event_context *ctx)
                 /* Skip invalidated pending event */
                 continue;
             }
-            event_mask = event_mask_from_epoll_events(e->events);
+            event_mask = event_mask_from_epoll_events(e->events) &
+                    io->event_mask;
             if (!event_mask) {
                 /* Received event we don't care about */
                 continue;
@@ -427,21 +428,28 @@ int event_io_register(struct event_io *io, int fd, uint32_t event_mask)
     EVENT_ASSERT(io->ctx != NULL);
 
     if (io->fd != -1) {
+        /* Modifying an existing listener's events */
         if (io->fd != fd) {
             /* Listener is already registered to a different FD */
             return -EEXIST;
         }
-        /* Modify an existing listener's events */
+        if (event_mask == io->event_mask) {
+            /* No change */
+            return 0;
+        }
         if (epoll_ctl(io->ctx->epoll_fd, EPOLL_CTL_MOD, io->fd, &event) < 0) {
             return -errno;
         }
+        io->event_mask = event_mask;
         return 0;
     }
-    /* Add a new listener */
+
+    /* Adding a new listener */
     if (epoll_ctl(io->ctx->epoll_fd, EPOLL_CTL_ADD, fd, &event) < 0) {
         return -errno;
     }
     io->fd = fd;
+    io->event_mask = event_mask;
     LIST_INSERT_HEAD(&io->ctx->io_list, io, entry);
     return 0;
 }
@@ -482,6 +490,7 @@ int event_io_unregister(struct event_io *io)
         }
     }
     io->fd = -1;
+    io->event_mask = 0;
     return r;
 }
 

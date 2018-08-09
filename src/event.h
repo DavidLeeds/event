@@ -37,6 +37,7 @@ struct event_context;
 struct event_io {
     struct event_context *ctx;
     int fd;
+    uint32_t event_mask;
     void (*handler)(struct event_io *, uint32_t, void *);
     void *handler_arg;
     LIST_ENTRY(event_io) entry;
