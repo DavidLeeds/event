@@ -565,23 +565,54 @@ void event_timer_init(struct event_context *ctx, struct event_timer *t,
 }
 
 /*
- * Set a timer with the specified delay (in milliseconds).  If periodic is
+ * Set a timer with the specified interval (in milliseconds).  If periodic is
  * true, the timer will repeat indefinitely.  Otherwise, it will run once.
+ *
  * For periodic timers, long handler execution times will not skew the timeout
  * period, unless the handler does not return before the start of the next
  * period.
  */
-void event_timer_set(struct event_timer *t, uint64_t ms, bool periodic)
+void event_timer_set(struct event_timer *t, uint64_t interval_ms,
+        bool periodic)
 {
     EVENT_ASSERT(t != NULL);
     EVENT_ASSERT(t->ctx != NULL);
-    EVENT_ASSERT(!periodic || ms > 0);
+    EVENT_ASSERT(!periodic || interval_ms > 0);
 
     event_timer_cancel(t);
-    event_timer_insert(t, event_monotonic_ms() + ms);
+    event_timer_insert(t, event_monotonic_ms() + interval_ms);
     if (periodic) {
-        t->repeat_ms = ms;
+        t->repeat_ms = interval_ms;
     }
+}
+
+/*
+ * Set a timer that fires at the specified absolute time (in milliseconds since
+ * boot on the monotonic clock).  If repeat_ms is non-zero, the timer will
+ * repeat indefinitely with the specified interval.  Otherwise, it will run
+ * once.
+ *
+ * For periodic timers, long handler execution times will not skew the timeout
+ * period, unless the handler does not return before the start of the next
+ * period.
+ */
+void event_timer_set_abs(struct event_timer *t, uint64_t start_ms,
+        uint64_t repeat_ms)
+{
+    uint64_t cur_time_ms;
+
+    EVENT_ASSERT(t != NULL);
+    EVENT_ASSERT(t->ctx != NULL);
+
+    cur_time_ms = event_monotonic_ms();
+    if (start_ms < cur_time_ms) {
+        /* Never allow start time in the past */
+        start_ms = cur_time_ms;
+    }
+
+    event_timer_cancel(t);
+    event_timer_insert(t, start_ms);
+    t->repeat_ms = repeat_ms;
 }
 
 /*
@@ -604,7 +635,7 @@ void event_timer_cancel(struct event_timer *t)
  * Return the number of milliseconds before the timer fires, or -1 if it is not
  * set.
  */
-int64_t event_timer_delay_ms(const struct event_timer* t)
+int64_t event_timer_delay_ms(const struct event_timer *t)
 {
     uint64_t cur_time_ms;
 
