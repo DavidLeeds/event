@@ -22,6 +22,7 @@
 #define EVENT_ASSERT(expr)
 #endif
 
+#define EVENT_EPOLL_PRIORITY            (EPOLLPRI)
 #define EVENT_EPOLL_READ                (EPOLLIN | EPOLLPRI)
 #define EVENT_EPOLL_WRITE               (EPOLLOUT)
 #ifdef EPOLLRDHUP    /* Since Linux 2.6.17 */
@@ -55,6 +56,9 @@ static uint32_t event_mask_to_epoll_events(uint32_t events)
     if (events & EVENT_IO_READ) {
         mask |= EVENT_EPOLL_READ;
     }
+    if (events & EVENT_IO_PRIORITY) {
+        mask |= EVENT_EPOLL_PRIORITY;
+    }
     if (events & EVENT_IO_WRITE) {
         mask |= EVENT_EPOLL_WRITE;
     }
@@ -73,6 +77,9 @@ static uint32_t event_mask_from_epoll_events(uint32_t events)
 
     if (events & EVENT_EPOLL_READ) {
         mask |= EVENT_IO_READ;
+    }
+    if (events & EVENT_EPOLL_PRIORITY) {
+        mask |= EVENT_IO_PRIORITY;
     }
     if (events & EVENT_EPOLL_WRITE) {
         mask |= EVENT_IO_WRITE;
