@@ -26,7 +26,8 @@ struct epoll_event;
 enum event_io_type {
     EVENT_IO_READ               = 0x01,
     EVENT_IO_WRITE              = 0x02,
-    EVENT_IO_DISCONNECT         = 0x04
+    EVENT_IO_DISCONNECT         = 0x04,
+    EVENT_IO_PRIORITY           = 0x08
 };
 
 struct event_context;
