@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2018 David Leeds <davidesleeds@gmail.com>
+ * Copyright (c) 2016-2020 David Leeds <davidesleeds@gmail.com>
  *
  * Event is free software; you can redistribute it and/or modify
  * it under the terms of the MIT license. See LICENSE for details.
@@ -7,13 +7,14 @@
 
 #include <time.h>
 #include <unistd.h>
+#include <string.h>
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/epoll.h>
 #include <errno.h>
 
-#include "event.h"
+#include <event.h>
 
 #ifndef EVENT_NOASSERT
 #include <assert.h>
@@ -22,20 +23,16 @@
 #define EVENT_ASSERT(expr)
 #endif
 
-#define EVENT_EPOLL_PRIORITY            (EPOLLPRI)
 #define EVENT_EPOLL_READ                (EPOLLIN | EPOLLPRI)
 #define EVENT_EPOLL_WRITE               (EPOLLOUT)
-#ifdef EPOLLRDHUP    /* Since Linux 2.6.17 */
 #define EVENT_EPOLL_HANGUP              (EPOLLERR | EPOLLHUP | EPOLLRDHUP)
-#else
-#define EVENT_EPOLL_HANGUP              (EPOLLERR | EPOLLHUP)
-#endif
+#define EVENT_EPOLL_PRIORITY            (EPOLLPRI)
 
 /*
  * Maximum number of events to process at a time with event_poll().  Remaining
  * events will be processed by a subsequent call.
  */
-#define EVENT_MAXEVENTS                 32
+#define EVENT_MAXEVENTS                 64
 
 /*
  * State for a dispatch event.
@@ -56,14 +53,14 @@ static uint32_t event_mask_to_epoll_events(uint32_t events)
     if (events & EVENT_IO_READ) {
         mask |= EVENT_EPOLL_READ;
     }
-    if (events & EVENT_IO_PRIORITY) {
-        mask |= EVENT_EPOLL_PRIORITY;
-    }
     if (events & EVENT_IO_WRITE) {
         mask |= EVENT_EPOLL_WRITE;
     }
     if (events & EVENT_IO_DISCONNECT) {
         mask |= EVENT_EPOLL_HANGUP;
+    }
+    if (events & EVENT_IO_PRIORITY) {
+        mask |= EVENT_EPOLL_PRIORITY;
     }
     return mask;
 }
@@ -78,14 +75,14 @@ static uint32_t event_mask_from_epoll_events(uint32_t events)
     if (events & EVENT_EPOLL_READ) {
         mask |= EVENT_IO_READ;
     }
-    if (events & EVENT_EPOLL_PRIORITY) {
-        mask |= EVENT_IO_PRIORITY;
-    }
     if (events & EVENT_EPOLL_WRITE) {
         mask |= EVENT_IO_WRITE;
     }
     if (events & EVENT_EPOLL_HANGUP) {
         mask |= EVENT_IO_DISCONNECT;
+    }
+    if (events & EVENT_EPOLL_PRIORITY) {
+        mask |= EVENT_IO_PRIORITY;
     }
     return mask;
 }
@@ -107,9 +104,8 @@ static void event_dispatch_handler(struct event_io *io, uint32_t event_mask,
         void *arg)
 {
     struct event_dispatch dispatch;
-    int fd = event_io_fd(io);
 
-    while (recv(fd, &dispatch, sizeof(dispatch), 0) == sizeof(dispatch)) {
+    while (recv(io->fd, &dispatch, sizeof(dispatch), 0) == sizeof(dispatch)) {
         dispatch.handler(dispatch.handler_arg);
     }
 }
@@ -124,11 +120,14 @@ static int event_register_dispatch_handler(struct event_context *ctx)
     int r;
 
     event_io_init(ctx, &ctx->dispatch_listener, event_dispatch_handler, NULL);
-    if (socketpair(AF_UNIX, SOCK_SEQPACKET, 0, fds) < 0) {
+
+    if (socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, fds) < 0) {
         return -errno;
     }
+
     /* Set the receiving file descriptor to non-blocking mode */
     fcntl(fds[1], F_SETFL, fcntl(fds[1], F_GETFL, 0) | O_NONBLOCK);
+
     /* Listen for dispatch messages */
     r = event_io_register(&ctx->dispatch_listener, fds[1], EVENT_IO_READ);
     if (r < 0) {
@@ -217,6 +216,7 @@ static int64_t event_timer_poll(struct event_context *ctx)
 {
     struct event_timer *t;
     uint64_t cur_time_ms = 0;
+    uint64_t next_time_ms;
 
     EVENT_ASSERT(ctx != NULL);
 
@@ -231,8 +231,10 @@ static int64_t event_timer_poll(struct event_context *ctx)
                 return t->time_ms - cur_time_ms;
             }
         }
+
         /* Pop first timer off queue and fire it */
         LIST_REMOVE(t, entry);
+
         if (t->repeat_ms) {
             /* Periodic timer: schedule next event */
             next_time_ms = t->time_ms;
@@ -246,6 +248,7 @@ static int64_t event_timer_poll(struct event_context *ctx)
             /* One-shot timer: clear it */
             t->time_ms = 0;
         }
+
         t->handler(t, t->handler_arg);
     }
     return -1;
@@ -256,7 +259,7 @@ static int64_t event_timer_poll(struct event_context *ctx)
  * Returns 0 on a normal event, signal interrupt, or timeout, and -errno
  * for an unrecoverable error.
  */
-static int event_poll(struct event_context *ctx)
+static int event_poll(struct event_context *ctx, int timeout_ms)
 {
     struct epoll_event epoll_buf[EVENT_MAXEVENTS];
     struct epoll_event *e;
@@ -266,8 +269,12 @@ static int event_poll(struct event_context *ctx)
 
     EVENT_ASSERT(ctx != NULL);
 
-    r = epoll_wait(ctx->epoll_fd, epoll_buf, EVENT_MAXEVENTS,
-            event_timer_poll(ctx));
+    r = epoll_wait(ctx->epoll_fd, epoll_buf, EVENT_MAXEVENTS, timeout_ms);
+    if (r < 0 && errno != EINTR) {
+        /* Unexpected error */
+        return -errno;
+    }
+
     if (r > 0) {
         /* One or more events to process */
         for (e = epoll_buf; e < &epoll_buf[r]; ++e) {
@@ -277,6 +284,7 @@ static int event_poll(struct event_context *ctx)
                 /* Received an invalidated or unsupported event */
                 continue;
             }
+
             /* Expose pending list for event_io_set_mask() */
             ctx->epoll_pending = e + 1;
             ctx->epoll_pending_len = &epoll_buf[r] - e - 1;
@@ -295,16 +303,15 @@ static int event_poll(struct event_context *ctx)
                 event_io_set_mask(io, 0);
                 continue;
             }
+
             io->handler(io, event_mask, io->handler_arg);
         }
+
         ctx->epoll_pending = NULL;
         ctx->epoll_pending_len = 0;
         return 0;
     }
-    if (r < 0 && errno != EINTR) {
-        /* Unexpected error */
-        return -errno;
-    }
+
     /* Timeout or signal interruption */
     return 0;
 }
@@ -315,35 +322,30 @@ static int event_poll(struct event_context *ctx)
  */
 int event_init(struct event_context *ctx)
 {
+    int r;
+
     EVENT_ASSERT(ctx != NULL);
+
+    memset(ctx, 0, sizeof(*ctx));
 
     /* Identify the event thread to detect actions from other threads */
     ctx->thread = pthread_self();
 
     /* Initialize I/O listener */
-#ifdef EPOLL_CLOEXEC
     ctx->epoll_fd = epoll_create1(EPOLL_CLOEXEC);
-#else
-    ctx->epoll_fd = epoll_create(1);
-    if (ctx->epoll_fd >= 0) {
-        fcntl(ctx->epoll_fd, F_SETFD, FD_CLOEXEC);
-    }
-#endif
     if (ctx->epoll_fd < 0) {
         return -errno;
     }
-    ctx->epoll_pending = NULL;
-    ctx->epoll_pending_len = 0;
-    LIST_INIT(&ctx->io_list);
 
-    /* Initialize timer */
+    LIST_INIT(&ctx->io_list);
     LIST_INIT(&ctx->timer_list);
 
     /* Setup thread-safe poll signaling mechanism */
-    event_register_dispatch_handler(ctx);
-
-    /* Initialize exit flag */
-    ctx->stop = false;
+    ctx->dispatch_fd = -1;
+    r = event_register_dispatch_handler(ctx);
+    if (r < 0) {
+        return r;
+    }
 
     return 0;
 }
@@ -363,11 +365,9 @@ void event_cleanup(struct event_context *ctx)
     event_unregister_dispatch_handler(ctx);
 
     /* Cancel any active timers */
-    LIST_FOREACH(t, &ctx->timer_list, entry) {
-        t->time_ms = 0;
-        t->repeat_ms = 0;
+    while ((t = LIST_FIRST(&ctx->timer_list)) != NULL) {
+        event_timer_cancel(t);
     }
-    LIST_INIT(&ctx->timer_list);
 
     /* Unregister file event listeners */
     while ((io = LIST_FIRST(&ctx->io_list)) != NULL) {
@@ -392,7 +392,7 @@ int event_run(struct event_context *ctx)
 
     /* Event loop */
     while (!ctx->stop) {
-        r = event_poll(ctx);
+        r = event_poll(ctx, event_timer_poll(ctx));
         if (r < 0) {
             return r;
         }
@@ -406,9 +406,11 @@ int event_run(struct event_context *ctx)
  * Thread and signal-safe mechanism to signal event_run() to return.
  * Returns 0 on success, or -errno on failure.
  */
-int event_stop(const struct event_context *ctx)
+int event_stop(struct event_context *ctx)
 {
-    return event_dispatch(ctx, event_stop_handler, (void *)ctx);
+    EVENT_ASSERT(ctx != NULL);
+
+    return event_dispatch(ctx, event_stop_handler, ctx);
 }
 
 /*
@@ -419,6 +421,7 @@ int event_dispatch(const struct event_context *ctx,
         void (*handler)(void *), void *arg)
 {
     struct event_dispatch dispatch = { handler, arg };
+    int flags = MSG_NOSIGNAL;
 
     EVENT_ASSERT(ctx != NULL);
     EVENT_ASSERT(handler != NULL);
@@ -431,8 +434,11 @@ int event_dispatch(const struct event_context *ctx,
      * thread.  Other threads will block if they dispatch more callbacks than
      * the dispatch socket buffer can accept.
      */
-    if (send(ctx->dispatch_fd, &dispatch, sizeof(dispatch), MSG_NOSIGNAL |
-            (pthread_equal(ctx->thread, pthread_self())) ? MSG_DONTWAIT : 0)
+    if (pthread_equal(ctx->thread, pthread_self())) {
+        flags |= MSG_DONTWAIT;
+    }
+
+    if (send(ctx->dispatch_fd, &dispatch, sizeof(dispatch), flags)
             != sizeof(dispatch)) {
         return -errno;
     }
@@ -483,6 +489,7 @@ int event_io_register(struct event_io *io, int fd, uint32_t event_mask)
         /* No change */
         return 0;
     }
+
     if (io->event_mask) {
         /* Modify/remove an existing listener */
         if (event_mask) {

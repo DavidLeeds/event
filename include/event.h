@@ -1,12 +1,11 @@
 /*
- * Copyright (c) 2016-2018 David Leeds <davidesleeds@gmail.com>
+ * Copyright (c) 2016-2020 David Leeds <davidesleeds@gmail.com>
  *
  * Event is free software; you can redistribute it and/or modify
  * it under the terms of the MIT license. See LICENSE for details.
  */
 
-#ifndef __DL_EVENT_H_
-#define __DL_EVENT_H_
+#pragma once
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -23,7 +22,7 @@ struct epoll_event;
 /*
  * One-hot encoded I/O event types.
  */
-enum event_io_type {
+enum {
     EVENT_IO_READ               = 0x01,
     EVENT_IO_WRITE              = 0x02,
     EVENT_IO_DISCONNECT         = 0x04,
@@ -96,7 +95,7 @@ int event_run(struct event_context *ctx);
  * Thread and signal-safe mechanism to signal event_run() to return.
  * Returns 0 on success, or -errno on failure.
  */
-int event_stop(const struct event_context *ctx);
+int event_stop(struct event_context *ctx);
 
 /*
  * Thread and signal-safe mechanism to invoke a function on the event thread,
@@ -220,5 +219,3 @@ bool event_timer_active(const struct event_timer *t);
  * internally to calculate timer timeout times.
  */
 uint64_t event_monotonic_ms(void);
-
-#endif    /* __DL_EVENT_H_ */
