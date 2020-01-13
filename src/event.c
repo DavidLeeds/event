@@ -145,16 +145,14 @@ static int event_register_dispatch_handler(struct event_context *ctx)
  */
 static void event_unregister_dispatch_handler(struct event_context *ctx)
 {
-    int fd;
-
     if (ctx->dispatch_fd == -1) {
         return;
     }
+
     close(ctx->dispatch_fd);
     ctx->dispatch_fd = -1;
-    fd = ctx->dispatch_listener.fd;
-    event_io_unregister(&ctx->dispatch_listener);
-    close(fd);
+
+    event_io_close(&ctx->dispatch_listener);
 }
 
 /*
@@ -516,7 +514,7 @@ int event_io_unregister(struct event_io *io)
 
     if (io->fd == -1) {
         /* Not registered */
-        return 0;
+        return -EBADF;
     }
     LIST_REMOVE(io, entry);
 
@@ -530,6 +528,26 @@ int event_io_unregister(struct event_io *io)
         event_io_set_mask(io, 0);
     }
     io->fd = -1;
+    return 0;
+}
+
+/*
+ * Unregister an I/O event listener and close the associated file descriptor.
+ * Returns 0 on success, or -errno on failure.
+ */
+int event_io_close(struct event_io *io)
+{
+    int fd;
+    int r;
+
+    EVENT_ASSERT(io != NULL);
+
+    fd = io->fd;
+    r = event_io_unregister(io);
+    if (r < 0) {
+        return r;
+    }
+    close(fd);
     return 0;
 }
 

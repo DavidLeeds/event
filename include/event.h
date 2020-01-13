@@ -127,6 +127,12 @@ int event_io_register(struct event_io *io, int fd, uint32_t event_mask);
 int event_io_unregister(struct event_io *io);
 
 /*
+ * Unregister an I/O event listener and close the associated file descriptor.
+ * Returns 0 on success, or -errno on failure.
+ */
+int event_io_close(struct event_io *io);
+
+/*
  * Return the event listener's file descriptor.
  */
 int event_io_fd(const struct event_io *io);
