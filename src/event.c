@@ -237,7 +237,13 @@ static int64_t event_timer_poll(struct event_context *ctx)
         LIST_REMOVE(t, entry);
         if (t->repeat_ms) {
             /* Periodic timer: schedule next event */
-            event_timer_insert(t, t->time_ms + t->repeat_ms);
+            next_time_ms = t->time_ms;
+            do {
+                /* Drop any timer repeats that occur in the past */
+                next_time_ms += t->repeat_ms;
+            } while (next_time_ms <= cur_time_ms);
+
+            event_timer_insert(t, next_time_ms);
         } else {
             /* One-shot timer: clear it */
             t->time_ms = 0;
@@ -576,8 +582,7 @@ void event_timer_init(struct event_context *ctx, struct event_timer *t,
  * true, the timer will repeat indefinitely.  Otherwise, it will run once.
  *
  * For periodic timers, long handler execution times will not skew the timeout
- * period, unless the handler does not return before the start of the next
- * period.
+ * period, although entire intervals may be dropped, if they occur in the past.
  */
 void event_timer_set(struct event_timer *t, uint64_t interval_ms,
         bool periodic)
@@ -599,9 +604,11 @@ void event_timer_set(struct event_timer *t, uint64_t interval_ms,
  * repeat indefinitely with the specified interval.  Otherwise, it will run
  * once.
  *
+ * Specifying a start time in the past will result in the timer firing
+ * immediately.
+ *
  * For periodic timers, long handler execution times will not skew the timeout
- * period, unless the handler does not return before the start of the next
- * period.
+ * period, although entire intervals may be dropped, if they occur in the past.
  */
 void event_timer_set_abs(struct event_timer *t, uint64_t start_ms,
         uint64_t repeat_ms)
@@ -611,10 +618,15 @@ void event_timer_set_abs(struct event_timer *t, uint64_t start_ms,
     EVENT_ASSERT(t != NULL);
     EVENT_ASSERT(t->ctx != NULL);
 
+    /* Start time must be less than one interval in the past */
     cur_time_ms = event_monotonic_ms();
-    if (start_ms < cur_time_ms) {
-        /* Never allow start time in the past */
-        start_ms = cur_time_ms;
+    if (start_ms <= cur_time_ms - repeat_ms) {
+        if (repeat_ms) {
+            /* Periodic timers align repeat time to start_ms */
+            start_ms = cur_time_ms - ((cur_time_ms - start_ms) % repeat_ms);
+        } else {
+            start_ms = cur_time_ms;
+        }
     }
 
     event_timer_cancel(t);

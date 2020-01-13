@@ -173,8 +173,7 @@ void event_timer_init(struct event_context *ctx, struct event_timer *t,
  * true, the timer will repeat indefinitely.  Otherwise, it will run once.
  *
  * For periodic timers, long handler execution times will not skew the timeout
- * period, unless the handler does not return before the start of the next
- * period.
+ * period, although entire intervals may be dropped, if they occur in the past.
  */
 void event_timer_set(struct event_timer *t, uint64_t interval_ms,
         bool periodic);
@@ -185,9 +184,11 @@ void event_timer_set(struct event_timer *t, uint64_t interval_ms,
  * repeat indefinitely with the specified interval.  Otherwise, it will run
  * once.
  *
+ * Specifying a start time in the past will result in the timer firing
+ * immediately.
+ *
  * For periodic timers, long handler execution times will not skew the timeout
- * period, unless the handler does not return before the start of the next
- * period.
+ * period, although entire intervals may be dropped, if they occur in the past.
  */
 void event_timer_set_abs(struct event_timer *t, uint64_t start_ms,
         uint64_t repeat_ms);
