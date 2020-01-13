@@ -1,0 +1,8 @@
+get_filename_component(Event_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
+include(CMakeFindDependencyMacro)
+
+if(NOT TARGET Event::Event)
+    include("${Event_CMAKE_DIR}/EventTargets.cmake")
+endif()
+
+set(Event_LIBRARIES Event::Event)
