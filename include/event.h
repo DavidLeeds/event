@@ -13,6 +13,10 @@
 #include <pthread.h>
 
 struct epoll_event;
+#if defined(EVENT_LIBSYSTEMD)
+struct sd_event;
+struct sd_event_source;
+#endif
 
 /*
  * Define EVENT_NOASSERT to compile out all assertions used internally.
@@ -69,6 +73,12 @@ struct event_context {
     struct event_io dispatch_listener;
     LIST_HEAD(, event_timer) timer_list;
     bool stop;
+
+#if defined(EVENT_LIBSYSTEMD)
+    struct sd_event *sd_event;
+    struct sd_event_source *sd_epoll;
+    struct sd_event_source *sd_timer;
+#endif
 };
 
 
@@ -219,3 +229,20 @@ bool event_timer_active(const struct event_timer *t);
  * internally to calculate timer timeout times.
  */
 uint64_t event_monotonic_ms(void);
+
+#if defined(EVENT_LIBSYSTEMD)
+
+/*
+ * Attach an event context to an existing sd-event loop.  This allows the
+ * event interface to be integrated with an application already using the
+ * sd-event library.
+ * Returns 0 on success, or -errno on failure.
+ */
+int event_attach_sdevent(struct event_context *ctx, struct sd_event *e);
+
+/*
+ * Detach an event context from an sd-event loop.
+ */
+void event_detach_sdevent(struct event_context *ctx);
+
+#endif /* EVENT_LIBSYSTEMD */
