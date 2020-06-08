@@ -6,6 +6,7 @@ Tiny epoll-based event loop library for event-driven Linux applications.
 * Timers with millisecond resolution
 * Dispatch and exit handling that is thread- and signal-safe and lock-free
 * Delightfully simple and clean interface
+* Integration with systemd sd-event loop
 
 ### Future Work
 * Add macros to selectively disable sub-features
