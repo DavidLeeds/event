@@ -373,6 +373,11 @@ void event_cleanup(struct event_context *ctx)
     while ((io = LIST_FIRST(&ctx->io_list)) != NULL) {
         event_io_unregister(io);
     }
+
+#if defined(EVENT_LIBSYSTEMD)
+    event_detach_sdevent(ctx);
+#endif
+
     close(ctx->epoll_fd);
 }
 
@@ -720,3 +725,116 @@ uint64_t event_monotonic_ms(void)
     }
     return ((uint64_t)now.tv_sec) * 1000 + (uint64_t)(now.tv_nsec / 1000000);
 }
+
+
+#if defined(EVENT_LIBSYSTEMD)
+#include <systemd/sd-event.h>
+
+/*
+ * sd-event callback to process pending epoll events.
+ */
+static int event_sdevent_poll_callback(sd_event_source *s, int fd,
+        uint32_t revents, void *userdata)
+{
+    struct event_context *ctx = (struct event_context *)userdata;
+
+    return event_poll(ctx, 0);
+}
+
+/*
+ * sd-event callback to schedule the next timer callback.
+ */
+static int event_sdevent_prepare_callback(sd_event_source *s, void *userdata)
+{
+    struct event_context *ctx = (struct event_context *)userdata;
+    struct event_timer *t;
+    uint64_t usec, pending_usec;
+
+    t = LIST_FIRST(&ctx->timer_list);
+    if (t) {
+        /* Schedule timer callback for soonest timer timeout */
+        usec = t->time_ms * 1000;
+        sd_event_source_get_time(ctx->sd_timer, &pending_usec);
+        if (usec != pending_usec) {
+            /* Only set time if changed (optimization) */
+            sd_event_source_set_time(ctx->sd_timer, t->time_ms * 1000);
+        }
+        sd_event_source_set_enabled(ctx->sd_timer, SD_EVENT_ONESHOT);
+    } else {
+        /* No pending timers */
+        sd_event_source_set_enabled(ctx->sd_timer, SD_EVENT_OFF);
+    }
+    return 0;
+}
+
+/*
+ * sd-event callback to run the expired timers.
+ */
+static int event_sdevent_timer_callback(sd_event_source *s, uint64_t usec,
+        void *userdata)
+{
+    struct event_context *ctx = (struct event_context *)userdata;
+
+    event_timer_poll(ctx);
+    return 0;
+}
+
+/*
+ * Attach an event context to an existing sd-event loop.  This allows the
+ * event interface to be integrated with an application already using the
+ * sd-event library.
+ * Returns 0 on success, or -errno on failure.
+ */
+int event_attach_sdevent(struct event_context *ctx, struct sd_event *e)
+{
+    int r;
+
+    EVENT_ASSERT(ctx != NULL);
+    EVENT_ASSERT(e != NULL);
+
+    if (ctx->sd_event) {
+        /* Already attached */
+        return -EBUSY;
+    }
+    ctx->sd_event = sd_event_ref(e);
+
+    /* Listen for epoll events */
+    r = sd_event_add_io(ctx->sd_event, &ctx->sd_epoll, ctx->epoll_fd,
+            EPOLLIN, event_sdevent_poll_callback, ctx);
+    if (r < 0) {
+        goto error;
+    }
+    /* Register callback to update sd-event timer before waiting for events */
+    r = sd_event_source_set_prepare(ctx->sd_epoll,
+            event_sdevent_prepare_callback);
+    if (r < 0) {
+        goto error;
+    }
+    /* Create timer to handle timer expiration */
+    r = sd_event_add_time(ctx->sd_event, &ctx->sd_timer, CLOCK_MONOTONIC,
+            0, 1000, event_sdevent_timer_callback, ctx);
+    if (r < 0) {
+        goto error;
+    }
+    sd_event_source_set_enabled(ctx->sd_timer, SD_EVENT_OFF);
+
+    return 0;
+
+error:
+    event_detach_sdevent(ctx);
+    return r;
+}
+
+/*
+ * Detach an event context from an sd-event loop.
+ */
+void event_detach_sdevent(struct event_context *ctx)
+{
+    EVENT_ASSERT(ctx != NULL);
+
+    ctx->sd_epoll = sd_event_source_unref(ctx->sd_epoll);
+    ctx->sd_timer = sd_event_source_unref(ctx->sd_timer);
+    ctx->sd_event = sd_event_unref(ctx->sd_event);
+}
+
+#endif /* EVENT_LIBSYSTEMD */

@@ -22,8 +22,14 @@ target_include_directories(event
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
+target_compile_options(event
+    PRIVATE $<$<C_COMPILER_ID:GNU>:-Wall -Werror>
+)
 
-target_compile_options(event PRIVATE $<$<C_COMPILER_ID:GNU>:-Wall -Werror>)
+if(TARGET Systemd::Libsystemd)
+    target_compile_options(event PUBLIC -DEVENT_LIBSYSTEMD)
+    target_link_libraries(event PUBLIC Systemd::Libsystemd)
+endif()
 
 ##############################################
 # Installation instructions
