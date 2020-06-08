@@ -10,10 +10,11 @@ add_library(event
     src/event.c
 )
 
-#Add an alias so that library can be used inside the build tree, e.g. when testing
+# Add an alias so that library can be used inside the build tree,
+# e.g. when testing
 add_library(Event::Event ALIAS event)
 
-#Set target properties
+# Set target properties
 target_include_directories(event
     PUBLIC
         $<INSTALL_INTERFACE:include>
@@ -36,19 +37,24 @@ install(TARGETS event
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 
-# This is required so that the exported target has the name Event and not event
-set_target_properties(event PROPERTIES EXPORT_NAME Event)
+# Ensure the exported target has the name Event and not event
+# and if this is linked into a shared library, ensure it is PIC
+set_target_properties(event
+    PROPERTIES
+        EXPORT_NAME Event
+        POSITION_INDEPENDENT_CODE 1
+)
 
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 # Export the targets to a script
 install(EXPORT event-targets
-  FILE
-    EventTargets.cmake
-  NAMESPACE
-    Event::
-  DESTINATION
-    ${INSTALL_CONFIGDIR}
+    FILE
+        EventTargets.cmake
+    NAMESPACE
+        Event::
+    DESTINATION
+        ${INSTALL_CONFIGDIR}
 )
 
 # Create a ConfigVersion.cmake file
@@ -59,7 +65,8 @@ write_basic_package_version_file(
     COMPATIBILITY AnyNewerVersion
 )
 
-configure_package_config_file(${CMAKE_CURRENT_LIST_DIR}/cmake/EventConfig.cmake.in
+configure_package_config_file(
+    ${CMAKE_CURRENT_LIST_DIR}/cmake/EventConfig.cmake.in
     ${CMAKE_CURRENT_BINARY_DIR}/EventConfig.cmake
     INSTALL_DESTINATION ${INSTALL_CONFIGDIR}
 )
@@ -72,8 +79,11 @@ install(FILES
 )
 
 ##############################################
-## Exporting from the build tree
-export(EXPORT event-targets FILE ${CMAKE_CURRENT_BINARY_DIR}/EventTargets.cmake NAMESPACE Event::)
+# Exporting from the build tree
+export(EXPORT event-targets
+    FILE ${CMAKE_CURRENT_BINARY_DIR}/EventTargets.cmake
+    NAMESPACE Event::
+)
 
 # Register package in user's package registry
 export(PACKAGE Event)
