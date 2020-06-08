@@ -9,7 +9,6 @@ Tiny epoll-based event loop library for event-driven Linux applications.
 * Integration with systemd sd-event loop
 
 ### Future Work
-* Add macros to selectively disable sub-features
 * Add file and directory listener support built on inotify
 * Add built-in signal handling support (if signalfd can be be setup in a bullet-proof way)
-* Add alternate implementation for event.h that provides a callback interface to allow libraries using this event library to integrate with applications built on a different event handling framework (such as libevent, glib, or sd-event).
+* Enhance event_dispatch() to allow high throughput capability (currently limited by socket buffer size).
