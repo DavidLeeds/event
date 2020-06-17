@@ -14,6 +14,10 @@
 #include <sys/epoll.h>
 #include <errno.h>
 
+#if defined(EVENT_LIBSYSTEMD)
+#include <systemd/sd-event.h>
+#endif /* EVENT_LIBSYSTEMD */
+
 #include <event.h>
 
 #ifndef EVENT_NOASSERT
@@ -93,6 +97,14 @@ static uint32_t event_mask_from_epoll_events(uint32_t events)
 static void event_stop_handler(void *arg)
 {
     struct event_context *ctx = (struct event_context *)arg;
+
+#if defined(EVENT_LIBSYSTEMD)
+    if (ctx->sd_event) {
+        /* Exit attached sd-event loop instead of stopping our own */
+        sd_event_exit(ctx->sd_event, 0);
+        return;
+    }
+#endif /* EVENT_LIBSYSTEMD */
 
     ctx->stop = true;
 }
@@ -375,8 +387,9 @@ void event_cleanup(struct event_context *ctx)
     }
 
 #if defined(EVENT_LIBSYSTEMD)
+    /* Cleanup sd-event handlers, if attached */
     event_detach_sdevent(ctx);
-#endif
+#endif /* EVENT_LIBSYSTEMD */
 
     close(ctx->epoll_fd);
 }
@@ -394,6 +407,13 @@ int event_run(struct event_context *ctx)
 
     /* Update in case event_init() was called on a different thread */
     ctx->thread = pthread_self();
+
+#if defined(EVENT_LIBSYSTEMD)
+    if (ctx->sd_event) {
+        /* Enter attached sd-event loop instead of entering our own */
+        return sd_event_loop(ctx->sd_event);
+    }
+#endif /* EVENT_LIBSYSTEMD */
 
     /* Event loop */
     while (!ctx->stop) {
@@ -719,17 +739,17 @@ bool event_timer_active(const struct event_timer *t)
 uint64_t event_monotonic_ms(void)
 {
     struct timespec now;
+    int r;
 
-    if (clock_gettime(CLOCK_MONOTONIC, &now)) {
-        EVENT_ASSERT(0);
-    }
+    do {
+        r = clock_gettime(CLOCK_MONOTONIC, &now);
+    } while (r < 0 && errno == EINTR);
+    EVENT_ASSERT(r == 0);
+
     return ((uint64_t)now.tv_sec) * 1000 + (uint64_t)(now.tv_nsec / 1000000);
 }
 
-
 #if defined(EVENT_LIBSYSTEMD)
-#include <systemd/sd-event.h>
-
 /*
  * sd-event callback to process pending epoll events.
  */

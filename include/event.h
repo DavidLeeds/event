@@ -16,7 +16,7 @@ struct epoll_event;
 #if defined(EVENT_LIBSYSTEMD)
 struct sd_event;
 struct sd_event_source;
-#endif
+#endif /* EVENT_LIBSYSTEMD */
 
 /*
  * Define EVENT_NOASSERT to compile out all assertions used internally.
@@ -78,7 +78,7 @@ struct event_context {
     struct sd_event *sd_event;
     struct sd_event_source *sd_epoll;
     struct sd_event_source *sd_timer;
-#endif
+#endif /* EVENT_LIBSYSTEMD */
 };
 
 
