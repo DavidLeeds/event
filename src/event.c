@@ -481,9 +481,10 @@ void event_io_init(struct event_context *ctx, struct event_io *io,
     EVENT_ASSERT(handler != NULL);
 
     io->ctx = ctx;
+    io->fd = -1;
+    io->event_mask = 0;
     io->handler = handler;
     io->handler_arg = arg;
-    io->fd = -1;
 }
 
 /*
